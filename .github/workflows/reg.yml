@@ -1,0 +1,80 @@
+name: BPReg
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  reg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install requests flask
+      - run: |
+          python -c "
+import requests, re, time, random, string, json
+
+H = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+ip_info = requests.get('https://ipinfo.io/json', timeout=10).json()
+print(f'IP: {ip_info}')
+
+S = requests.Session()
+S.headers.update({**H, 'Accept': 'text/html'})
+r0 = S.get('https://console.byteplus.com/auth/signup', timeout=12)
+spti = S.cookies.get('__spti', '')
+print(f'spti: {spti}')
+print(f'flagged: {"bapxu9rXuEQMtPL" in spti}')
+
+USERNAME = 'bpdev' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+PASSWORD = 'BpP1us!2026#A'
+gm = requests.get('https://api.guerrillamail.com/ajax.php?f=get_email_address', headers={'User-Agent':'Mozilla/5.0'}, timeout=10).json()
+_user = gm.get('email_addr','').split('@')[0]
+sid = gm.get('sid_token','')
+requests.get('https://api.guerrillamail.com/ajax.php', params={'f':'set_email_user','email_user':_user,'lang':'en','sid_token':sid,'in':'guerrillamail.com'}, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
+email = f'{_user}@guerrillamail.com'
+print(f'Email: {email}, Username: {USERNAME}')
+
+S.headers.update({'Accept':'application/json','Origin':'https://console.byteplus.com','Referer':'https://console.byteplus.com/auth/signup','X-Csrf-Token':'8b13c7ddf17a645320fff792b453c01c'})
+r_otp = S.post('https://console.byteplus.com/api/passport/login/sendSignupEmailforBP', json={'Email':email,'AccountType':'byteplus'}, timeout=15)
+print(f'OTP: {r_otp.status_code} {r_otp.text[:200]}')
+otp_ec = ''
+try: otp_ec = r_otp.json().get('ResponseMetadata',{}).get('Error',{}).get('Code','')
+except: pass
+if r_otp.status_code != 200 or otp_ec:
+    print('OTP send failed')
+    exit(1)
+
+otp = None
+for i in range(40):
+    time.sleep(3)
+    gm2 = requests.get(f'https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token={sid}', headers={'User-Agent':'Mozilla/5.0'}, timeout=15).json()
+    for mail in gm2.get('list',[]):
+        if any(x in mail.get('mail_subject','').lower() for x in ['byteplus','verify','code']):
+            mid = mail.get('mail_id')
+            br = requests.get(f'https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id={mid}&sid_token={sid}', headers={'User-Agent':'Mozilla/5.0'}, timeout=15).json()
+            body = br.get('mail_body','') + br.get('mail_body_html','')
+            codes = re.findall(r'\b(\d{6})\b', re.sub(r'<[^>]+>', ' ', body))
+            if codes:
+                otp = codes[0]
+                break
+    if otp:
+        print(f'OTP: {otp}')
+        break
+    print(f'checking {(i+1)*3}s...')
+
+if not otp:
+    print('NO OTP RECEIVED')
+    exit(1)
+
+r_reg = S.post('https://console.byteplus.com/api/passport/login/signup', json={'Email':email,'AccountName':USERNAME,'Password':PASSWORD,'VerificationCode':otp,'AccountType':'byteplus','AcceptAgreements':['byteplus_terms','byteplus_privacy']}, timeout=15)
+reg_ec = ''
+try: reg_ec = r_reg.json().get('ResponseMetadata',{}).get('Error',{}).get('Code','')
+except: pass
+print(f'Register: {r_reg.status_code} ec={reg_ec}')
+print(f'Body: {r_reg.text[:500]}')
+if not reg_ec:
+    print(f'SUCCESS email={email} user={USERNAME} pass={PASSWORD}')
+"
